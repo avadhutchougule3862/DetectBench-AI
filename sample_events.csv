@@ -1,0 +1,8 @@
+
+failed_logins,requests_per_minute,unusual_hour,new_device,bytes_sent_kb,actual_label
+1,20,0,0,300,0
+7,25,0,0,450,1
+2,60,0,1,800,1
+1,18,1,1,250,0
+6,50,1,1,2000,1
+0,15,0,0,150,0
