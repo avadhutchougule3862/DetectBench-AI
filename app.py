@@ -243,75 +243,7 @@ def dashboard():
         upload_error=upload_error,
         upload_has_labels=upload_has_labels
     )
-@app.route("/download-report", methods=["POST"])
-def download_report():
-    file = request.files.get("csv_file")
 
-    if not file or not file.filename:
-        return "Please select the CSV file again to download the report.", 400
-
-    if not file.filename.lower().endswith(".csv"):
-        return "Only CSV files are supported.", 400
-
-    try:
-        uploaded = pd.read_csv(file)
-
-        if uploaded.empty or len(uploaded) > 50000:
-            return "CSV must contain 1 to 50,000 rows.", 400
-
-        missing = [col for col in FEATURES if col not in uploaded.columns]
-        if missing:
-            return "Missing required columns: " + ", ".join(missing), 400
-
-        for col in FEATURES:
-            uploaded[col] = pd.to_numeric(uploaded[col], errors="raise")
-
-        if uploaded[FEATURES].isnull().any().any():
-            return "Required columns contain missing values.", 400
-
-        if not np.isfinite(uploaded[FEATURES].to_numpy()).all():
-            return "Feature columns contain invalid values.", 400
-
-        for col in ["unusual_hour", "new_device"]:
-            if not uploaded[col].isin([0, 1]).all():
-                return f"{col} must contain only 0 or 1.", 400
-
-        if (uploaded[["failed_logins", "requests_per_minute",
-                      "bytes_sent_kb"]] < 0).any().any():
-            return "Counts and bytes_sent_kb cannot be negative.", 400
-
-        if "actual_label" in uploaded.columns:
-            uploaded["actual_label"] = pd.to_numeric(
-                uploaded["actual_label"], errors="raise"
-            )
-            if (
-                uploaded["actual_label"].isnull().any()
-                or not uploaded["actual_label"].isin([0, 1]).all()
-            ):
-                return "actual_label must contain only 0 and 1.", 400
-
-        analyzed, results = evaluate_data(uploaded)
-
-        output = io.StringIO()
-        output.write("DETECTBENCH AI - ANALYSIS REPORT\n")
-        output.write("Note: Results depend on the uploaded dataset.\n\n")
-        output.write("EVENT ANALYSIS\n")
-        analyzed.to_csv(output, index=False)
-
-        output.write("\nDETECTION METRICS\n")
-        metrics_df = pd.DataFrame.from_dict(results, orient="index")
-        metrics_df.index.name = "detection_method"
-        metrics_df.to_csv(output)
-
-        response = make_response(output.getvalue())
-        response.headers["Content-Disposition"] = (
-            "attachment; filename=detectbench_analysis_report.csv"
-        )
-        response.headers["Content-Type"] = "text/csv; charset=utf-8"
-        return response
-
-    except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
-        return f"Could not process CSV: {exc}", 400
 
 @app.errorhandler(413)
 def file_too_large(error):
@@ -319,4 +251,4 @@ def file_too_large(error):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
