@@ -310,6 +310,49 @@
             </div>
         </section>
 
+
+        
+        <section class="section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">CLASSIFICATION EVALUATION</p>
+                    <h2>Confusion Matrix</h2>
+                </div>
+            </div>
+
+            <p class="upload-help">
+                TN = Correct normal events |
+                FP = Normal events incorrectly flagged |
+                FN = Suspicious events missed |
+                TP = Correctly detected suspicious events
+            </p>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Detection Method</th>
+                            <th>TN</th>
+                            <th>FP</th>
+                            <th>FN</th>
+                            <th>TP</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for method, metric in results.items() %}
+                        <tr>
+                            <td>{{ method }}</td>
+                            <td>{{ metric.tn }}</td>
+                            <td>{{ metric.fp }}</td>
+                            <td>{{ metric.fn }}</td>
+                            <td>{{ metric.tp }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <section class="section">
             <div class="section-heading">
                 <div>

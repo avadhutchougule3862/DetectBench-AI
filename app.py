@@ -5,7 +5,12 @@ from flask import Flask, render_template, request
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import (
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
@@ -48,6 +53,7 @@ def evaluate_data(data):
         (rule_alert == 1) | (ml_alert == 1)
     ).astype(int)
 
+    # Add predictions to the dataset
     data["rule_alert"] = rule_alert
     data["ml_alert"] = ml_alert
     data["hybrid_alert"] = hybrid_alert
@@ -64,35 +70,58 @@ def evaluate_data(data):
     if "actual_label" in data.columns:
         actual = data["actual_label"].astype(int)
 
+        if not actual.isin([0, 1]).all():
+            raise ValueError(
+                "actual_label must contain only 0 and 1."
+            )
+
         for name, predicted in predictions.items():
-            fp = int(((predicted == 1) & (actual == 0)).sum())
-            tn = int(((predicted == 0) & (actual == 0)).sum())
-            missed = int(((predicted == 0) & (actual == 1)).sum())
+
+            # Confusion Matrix: labels are [0, 1]
+            tn, fp, fn, tp = confusion_matrix(
+                actual,
+                predicted,
+                labels=[0, 1]
+            ).ravel()
+
+            # Precision, Recall and F1-score
+            precision = precision_score(
+                actual, predicted, zero_division=0
+            )
+
+            recall = recall_score(
+                actual, predicted, zero_division=0
+            )
+
+            f1 = f1_score(
+                actual, predicted, zero_division=0
+            )
+
+            # False Positive Rate
+            fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
             results[name] = {
                 "alerts": int(predicted.sum()),
-                "precision": round(
-                    precision_score(actual, predicted, zero_division=0) * 100, 1
-                ),
-                "recall": round(
-                    recall_score(actual, predicted, zero_division=0) * 100, 1
-                ),
-                "f1": round(
-                    f1_score(actual, predicted, zero_division=0) * 100, 1
-                ),
-                "fpr": round(fp / max(fp + tn, 1) * 100, 1),
-                "false_positives": fp,
-                "missed": missed
+                "precision": round(precision * 100, 1),
+                "recall": round(recall * 100, 1),
+                "f1": round(f1 * 100, 1),
+                "tn": int(tn),
+                "fp": int(fp),
+                "fn": int(fn),
+                "tp": int(tp),
+                "fpr": round(fpr * 100, 1),
+                "false_positives": int(fp),
+                "missed": int(fn)
             }
 
     else:
+        # Without ground-truth labels, metrics cannot be calculated
         for name, predicted in predictions.items():
             results[name] = {
                 "alerts": int(predicted.sum())
             }
 
     return data, results
-
 
 def run_demo():
     rng = np.random.default_rng(42)
@@ -248,6 +277,97 @@ def dashboard():
 @app.errorhandler(413)
 def file_too_large(error):
     return "CSV file is too large. Maximum size is 5 MB.", 413
+
+
+@app.route("/download-report", methods=["POST"])
+def download_report():
+    import io
+    import csv
+    from flask import make_response
+
+    if "csv_file" not in request.files:
+        return "Please upload a CSV file.", 400
+
+    file = request.files["csv_file"]
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        return "Please upload a valid CSV file.", 400
+
+    try:
+        data = pd.read_csv(file)
+
+        if data.empty:
+            return "The uploaded CSV file is empty.", 400
+
+        required_columns = FEATURES
+        missing_columns = [
+            column for column in required_columns
+            if column not in data.columns
+        ]
+
+        if missing_columns:
+            return (
+                "Missing required columns: "
+                + ", ".join(missing_columns)
+            ), 400
+
+        # Use the same data analysis function as the dashboard.
+        analyzed_data, results = evaluate_data(data)
+
+        # Build one CSV report with event details and model metrics.
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow(["DETECTBENCH AI - ANALYSIS REPORT"])
+        writer.writerow([])
+        writer.writerow(["MODEL METRICS"])
+
+        if results and all(
+            metric in next(iter(results.values()))
+            for metric in ["precision", "recall", "f1"]
+        ):
+            writer.writerow([
+                "Model", "Alerts", "Precision (%)", "Recall (%)",
+                "F1 Score (%)", "TN", "FP", "FN", "TP"
+            ])
+
+            for model_name, metrics in results.items():
+                writer.writerow([
+                    model_name,
+                    metrics.get("alerts", 0),
+                    metrics.get("precision", 0),
+                    metrics.get("recall", 0),
+                    metrics.get("f1", 0),
+                    metrics.get("tn", 0),
+                    metrics.get("fp", 0),
+                    metrics.get("fn", 0),
+                    metrics.get("tp", 0)
+                ])
+        else:
+            writer.writerow(["Model", "Alerts"])
+            for model_name, metrics in results.items():
+                writer.writerow([
+                    model_name,
+                    metrics.get("alerts", 0)
+                ])
+
+        writer.writerow([])
+        writer.writerow(["EVENT ANALYSIS"])
+
+        writer.writerow(list(analyzed_data.columns))
+        for _, row in analyzed_data.iterrows():
+            writer.writerow(row.tolist())
+
+        response = make_response(output.getvalue())
+        response.headers["Content-Type"] = "text/csv; charset=utf-8"
+        response.headers[
+            "Content-Disposition"
+        ] = "attachment; filename=detectbench_analysis_report.csv"
+
+        return response
+
+    except (ValueError, KeyError, pd.errors.ParserError) as error:
+        return f"Could not analyze CSV: {error}", 400
 
 
 if __name__ == "__main__":
