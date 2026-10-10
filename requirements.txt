@@ -3,4 +3,7 @@ pandas
 numpy
 scikit-learn
 pytest
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Login
 gunicorn; platform_system != "Windows"
