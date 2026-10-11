@@ -11,9 +11,53 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix
 )
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask import redirect, url_for, flash
+
+import os
+
+from extensions import db, migrate
+from models import User
 
 app = Flask(__name__)
+
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+
+database_url = os.environ.get(
+    "DATABASE_URL",
+    "sqlite:///detectbench.db"
+)
+
+# Render PostgreSQL URLs may use postgres://
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace(
+        "postgres://", "postgresql://", 1
+    )
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db.init_app(app)
+migrate.init_app(app, db)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please log in to access this page."
+
+app.config["SECRET_KEY"] = os.environ.get(
+    "SECRET_KEY",
+    "dev-only-change-this-secret-key"
+)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+
+
 
 FEATURES = [
     "failed_logins",
@@ -151,7 +195,88 @@ def run_demo():
     return events, results
 
 
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        if len(username) < 3 or len(username) > 80:
+            flash("Username must be between 3 and 80 characters.", "error")
+            return render_template("register.html")
+
+        if not email or len(email) > 120 or "@" not in email:
+            flash("Please enter a valid email address.", "error")
+            return render_template("register.html")
+
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+            return render_template("register.html")
+
+        existing_user = db.session.execute(
+            db.select(User).where(
+                db.or_(
+                    User.username == username,
+                    User.email == email
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing_user:
+            flash("Username or email already exists.", "error")
+            return render_template("register.html")
+
+        user = User(username=username, email=email)
+        user.set_password(password)
+
+        db.session.add(user)
+        db.session.commit()
+
+        flash("Registration successful! Please log in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+
+        user = db.session.execute(
+            db.select(User).where(User.email == email)
+        ).scalar_one_or_none()
+
+        if user and user.check_password(password):
+            login_user(user)
+            flash("Login successful!", "success")
+            return redirect(url_for("dashboard"))
+
+        flash("Invalid email or password.", "error")
+
+    return render_template("login.html")
+
+# ADD LOGOUT ROUTE HERE
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    flash("You have been logged out successfully.", "success")
+    return redirect(url_for("login"))
+
+
+
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def dashboard():
     demo_events, demo_results = run_demo()
 
@@ -369,6 +494,7 @@ def download_report():
     except (ValueError, KeyError, pd.errors.ParserError) as error:
         return f"Could not analyze CSV: {error}", 400
 
-
 if __name__ == "__main__":
-    app.run(debug=False)
+    with app.app_context():
+        db.create_all()
+    app.run(host="127.0.0.1", port=5000, debug=False)

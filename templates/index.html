@@ -13,6 +13,14 @@
 </head>
 
 <body>
+
+<div style="text-align: right; padding: 12px;">
+    <span>Welcome, {{ current_user.username }}!</span>
+    <a href="{{ url_for('logout') }}"
+       style="display: inline-block; margin-left: 12px; padding: 8px 14px; background: #dc3545; color: white; text-decoration: none; border-radius: 6px;">
+        Logout
+    </a>
+</div>
 <div class="app-shell">
 
     <header class="topbar">
@@ -31,7 +39,7 @@
     </header>
 
     <main>
-        
+
 <section class="section upload-section">
     <div class="section-heading">
         <div>
@@ -73,7 +81,7 @@
         </div>
 
         <h3>Uploaded Dataset Results</h3>
-        
+
 <form action="/download-report" method="POST" enctype="multipart/form-data" class="download-report-form">
     <label for="report_csv">Select the analyzed CSV again to download its report:</label>
 
@@ -311,7 +319,7 @@
         </section>
 
 
-        
+
         <section class="section">
             <div class="section-heading">
                 <div>

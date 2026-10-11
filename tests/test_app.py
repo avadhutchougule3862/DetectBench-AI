@@ -1,6 +1,37 @@
 
+import io
 import pandas as pd
+
 from app import app, evaluate_data, FEATURES
+from extensions import db
+from models import User
+
+
+def login_test_user(client):
+    with app.app_context():
+        user = db.session.execute(
+            db.select(User).where(
+                User.email == "test@example.com"
+            )
+        ).scalar_one_or_none()
+
+        if user is None:
+            user = User(
+                username="testuser",
+                email="test@example.com"
+            )
+            user.set_password("TestPassword123")
+            db.session.add(user)
+            db.session.commit()
+
+    client.post(
+        "/login",
+        data={
+            "email": "test@example.com",
+            "password": "TestPassword123"
+        },
+        follow_redirects=True
+    )
 
 
 def test_evaluate_data_returns_detection_columns():
@@ -42,21 +73,24 @@ def test_dashboard_loads():
 
     response = client.get("/")
 
-    assert response.status_code == 200
-    def test_upload_rejects_missing_columns():
-        client = app.test_client()
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_upload_rejects_missing_columns():
+    client = app.test_client()
+    login_test_user(client)
 
     response = client.post(
         "/",
         data={
             "csv_file": (
-                __import__("io").BytesIO(
-                    b"wrong_column\n1\n2\n"
-                ),
+                io.BytesIO(b"wrong_column\n1\n2\n"),
                 "test.csv"
             )
         },
-        content_type="multipart/form-data"
+        content_type="multipart/form-data",
+        follow_redirects=True
     )
 
     assert response.status_code == 200
@@ -64,9 +98,8 @@ def test_dashboard_loads():
 
 
 def test_download_report_returns_csv():
-    import io
-
     client = app.test_client()
+    login_test_user(client)
 
     csv_content = (
         b"failed_logins,requests_per_minute,"

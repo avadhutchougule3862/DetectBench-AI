@@ -7,3 +7,4 @@ Flask-SQLAlchemy
 Flask-Migrate
 Flask-Login
 gunicorn; platform_system != "Windows"
+psycopg[binary]==3.3.6
