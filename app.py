@@ -11,6 +11,11 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix
 )
+from flask import abort
+from werkzeug.utils import secure_filename
+from models import User, AnalysisHistory
+
+
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask import redirect, url_for, flash
 
@@ -359,6 +364,21 @@ def dashboard():
                     upload_has_labels = True
 
                 upload_events, upload_results = evaluate_data(uploaded)
+                # Save successful analysis to the logged-in user's history
+                history_record = AnalysisHistory(
+                    user_id=current_user.id,
+                    filename=secure_filename(file.filename) or "uploaded.csv",
+                    total_rows=len(uploaded),
+                    rule_alerts=upload_results["Rule-Based"]["alerts"],
+                    ml_alerts=upload_results["Isolation Forest"]["alerts"],
+                    hybrid_alerts=upload_results["Hybrid"]["alerts"],
+                )
+
+                db.session.add(history_record)
+                db.session.commit()
+
+
+
 
                 # Show only a limited number of rows on the page
                 upload_events = upload_events.tail(20).to_dict(
@@ -409,6 +429,7 @@ def file_too_large(error):
 
 
 @app.route("/download-report", methods=["POST"])
+@login_required
 def download_report():
     import io
     import csv
@@ -497,6 +518,18 @@ def download_report():
 
     except (ValueError, KeyError, pd.errors.ParserError) as error:
         return f"Could not analyze CSV: {error}", 400
+
+@app.route("/history")
+@login_required
+def analysis_history():
+    history = db.session.execute(
+        db.select(AnalysisHistory)
+        .where(AnalysisHistory.user_id == current_user.id)
+        .order_by(AnalysisHistory.created_at.desc())
+        .limit(100)
+    ).scalars().all()
+
+    return render_template("history.html", history=history)
 
 if __name__ == "__main__":
     with app.app_context():

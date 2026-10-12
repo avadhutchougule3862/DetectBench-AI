@@ -1,0 +1,69 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis History | DetectBench AI</title>
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark">DB</div>
+            <div>
+                <h1>DetectBench AI</h1>
+                <p>Your saved analysis history</p>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">PREVIOUS ANALYSES</p>
+                    <h2>Analysis History</h2>
+                </div>
+                <a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+            </div>
+
+            {% if history %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Filename</th>
+                            <th>Total Rows</th>
+                            <th>Rule Alerts</th>
+                            <th>ML Alerts</th>
+                            <th>Hybrid Alerts</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in history %}
+                        <tr>
+                            <td>
+                                {{ item.created_at.strftime("%d-%m-%Y %H:%M") }}
+                            </td>
+                            <td>{{ item.filename }}</td>
+                            <td>{{ item.total_rows }}</td>
+                            <td>{{ item.rule_alerts }}</td>
+                            <td>{{ item.ml_alerts }}</td>
+                            <td>{{ item.hybrid_alerts }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p>No saved analyses yet. Upload a CSV from the dashboard.</p>
+            {% endif %}
+        </section>
+    </main>
+</div>
+</body>
+</html>

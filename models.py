@@ -25,3 +25,27 @@ class User(UserMixin, db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    
+class AnalysisHistory(db.Model):
+    __tablename__ = "analysis_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("users.id"),
+        nullable=False,
+        index=True
+    )
+    filename = db.Column(db.String(255), nullable=False)
+    total_rows = db.Column(db.Integer, nullable=False, default=0)
+    rule_alerts = db.Column(db.Integer, nullable=False, default=0)
+    ml_alerts = db.Column(db.Integer, nullable=False, default=0)
+    hybrid_alerts = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    user = db.relationship("User", backref="analysis_history")

@@ -16,11 +16,20 @@
 
 <div style="text-align: right; padding: 12px;">
     <span>Welcome, {{ current_user.username }}!</span>
+
+    <!-- Analysis History Link -->
+    <a href="{{ url_for('analysis_history') }}"
+       style="display: inline-block; margin-left: 12px; padding: 8px 14px; background: #45d6c5; color: #0b1120; text-decoration: none; border-radius: 6px;">
+        Analysis History
+    </a>
+
+    <!-- Logout Link -->
     <a href="{{ url_for('logout') }}"
        style="display: inline-block; margin-left: 12px; padding: 8px 14px; background: #dc3545; color: white; text-decoration: none; border-radius: 6px;">
         Logout
     </a>
 </div>
+
 <div class="app-shell">
 
     <header class="topbar">
