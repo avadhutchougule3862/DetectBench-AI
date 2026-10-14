@@ -1,3 +1,4 @@
+
 import io
 import uuid
 
@@ -5,6 +6,7 @@ import pandas as pd
 import pytest
 
 from app import app, evaluate_data
+app.config["WTF_CSRF_ENABLED"] = False
 from extensions import db
 from models import User, AnalysisHistory
 
@@ -25,12 +27,15 @@ def setup_test_database():
 
     with app.app_context():
         db.create_all()
-        yield
+
+    yield
+
+    with app.app_context():
         db.session.remove()
         db.drop_all()
 
 
-def create_test_user(password="TestPassword123"):
+def create_test_user(password="testpass123"):
     unique = uuid.uuid4().hex[:10]
 
     with app.app_context():
@@ -53,7 +58,7 @@ def get_user_email(user_id):
         return user.email
 
 
-def login_user(client, email, password="TestPassword123"):
+def login_user(client, email, password="testpass123"):
     # Do not follow redirects; inspect the original login response.
     return client.post(
         "/login",
@@ -74,11 +79,17 @@ def test_evaluate_data_returns_detection_columns():
     analyzed, results = evaluate_data(data)
 
     assert len(analyzed) == len(data)
+
     assert {
-        "rule_alert", "ml_alert", "hybrid_alert"
+        "rule_alert",
+        "ml_alert",
+        "hybrid_alert",
     }.issubset(analyzed.columns)
+
     assert {
-        "Rule-Based", "Isolation Forest", "Hybrid"
+        "Rule-Based",
+        "Isolation Forest",
+        "Hybrid",
     }.issubset(results.keys())
 
 
@@ -108,8 +119,10 @@ def test_upload_rejects_missing_columns():
     client = app.test_client()
 
     login_response = login_user(
-        client, get_user_email(user_id)
+        client,
+        get_user_email(user_id),
     )
+
     assert login_response.status_code == 302
     assert login_response.headers.get("Location") == "/"
 
@@ -134,8 +147,10 @@ def test_download_report_returns_csv():
     client = app.test_client()
 
     login_response = login_user(
-        client, get_user_email(user_id)
+        client,
+        get_user_email(user_id),
     )
+
     assert login_response.status_code == 302
 
     csv_content = (
@@ -206,6 +221,7 @@ def test_history_isolated_between_two_users():
                 hybrid_alerts=4,
             ),
         ])
+
         db.session.commit()
 
     client_a = app.test_client()
@@ -214,7 +230,7 @@ def test_history_isolated_between_two_users():
     response_login_a = login_user(client_a, email_a)
     response_login_b = login_user(client_b, email_b)
 
-    # Both login requests should redirect to the dashboard.
+    # Both users should successfully log in.
     assert response_login_a.status_code == 302, (
         f"User A login failed: {response_login_a.status_code}"
     )

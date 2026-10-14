@@ -2,7 +2,7 @@
 import csv
 import io
 import os
-
+from flask_wtf.csrf import CSRFProtect
 import numpy as np
 import pandas as pd
 
@@ -35,18 +35,26 @@ from extensions import db, migrate
 from models import User, AnalysisHistory
 
 
+
 # --------------------------------------------------
 # APP CONFIGURATION
 # --------------------------------------------------
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.environ.get(
-    "SECRET_KEY",
-    "dev-only-change-this-secret-key",
-)
+secret_key = os.environ.get("SECRET_KEY")
 
+if not secret_key:
+    if os.environ.get("RENDER"):
+        raise RuntimeError(
+            "SECRET_KEY must be configured in production."
+        )
+    secret_key = "local-development-only-change-this-key"
+
+app.config["SECRET_KEY"] = secret_key
+csrf = CSRFProtect(app)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 database_url = os.environ.get(
     "DATABASE_URL",
@@ -66,8 +74,8 @@ elif database_url.startswith("postgresql://"):
         1,
     )
 
+# Database URI MUST be set before db.init_app()
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
 migrate.init_app(app, db)
@@ -84,6 +92,7 @@ def load_user(user_id):
         return db.session.get(User, int(user_id))
     except (TypeError, ValueError):
         return None
+
 
 
 # --------------------------------------------------
@@ -106,6 +115,44 @@ FEATURES = [
 def evaluate_data(data):
     data = data.copy()
 
+    if not data.columns.is_unique:
+        duplicates = data.columns[data.columns.duplicated()].unique().tolist()
+        raise ValueError(
+            "Duplicate column names are not allowed: "
+            + ", ".join(map(str, duplicates))
+        )
+
+    missing = [column for column in FEATURES if column not in data.columns]
+    if missing:
+        raise ValueError(
+            "Missing required columns: " + ", ".join(missing)
+        )
+
+    for column in FEATURES:
+        data[column] = pd.to_numeric(data[column], errors="raise")
+
+    if data.empty:
+        raise ValueError("The input dataset is empty.")
+
+    if data[FEATURES].isnull().any().any():
+        raise ValueError("Required feature columns contain missing values.")
+
+    if not np.isfinite(data[FEATURES].to_numpy(dtype=float)).all():
+        raise ValueError("Feature columns contain infinite or invalid values.")
+
+    for column in ["unusual_hour", "new_device"]:
+        if not data[column].isin([0, 1]).all():
+            raise ValueError(f"{column} must contain only 0 or 1.")
+
+    nonnegative_columns = [
+        "failed_logins",
+        "requests_per_minute",
+        "bytes_sent_kb",
+    ]
+
+    if (data[nonnegative_columns] < 0).any().any():
+        raise ValueError("Counts and bytes_sent_kb cannot be negative.")
+
     rule_alert = (
         (data["failed_logins"] >= 5)
         | (data["requests_per_minute"] >= 45)
@@ -121,13 +168,9 @@ def evaluate_data(data):
         random_state=42,
     )
 
-    ml_alert = (
-        model.fit_predict(data[FEATURES]) == -1
-    ).astype(int)
+    ml_alert = (model.fit_predict(data[FEATURES]) == -1).astype(int)
 
-    hybrid_alert = (
-        (rule_alert == 1) | (ml_alert == 1)
-    ).astype(int)
+    hybrid_alert = ((rule_alert == 1) | (ml_alert == 1)).astype(int)
 
     data["rule_alert"] = rule_alert
     data["ml_alert"] = ml_alert
@@ -141,15 +184,19 @@ def evaluate_data(data):
 
     results = {}
 
+    actual = None
     if "actual_label" in data.columns:
-        actual = data["actual_label"].astype(int)
+        actual = pd.to_numeric(data["actual_label"], errors="raise")
 
-        if not actual.isin([0, 1]).all():
-            raise ValueError(
-                "actual_label must contain only 0 and 1."
-            )
+        if actual.isnull().any() or not actual.isin([0, 1]).all():
+            raise ValueError("actual_label must contain only 0 and 1.")
 
-        for name, predicted in predictions.items():
+        actual = actual.astype(int)
+
+    for name, predicted in predictions.items():
+        metrics = {"alerts": int(predicted.sum())}
+
+        if actual is not None:
             tn, fp, fn, tp = confusion_matrix(
                 actual,
                 predicted,
@@ -166,14 +213,9 @@ def evaluate_data(data):
                 actual, predicted, zero_division=0
             )
 
-            fpr = (
-                fp / (fp + tn)
-                if (fp + tn) > 0
-                else 0.0
-            )
+            fpr = fp / (fp + tn) if (fp + tn) else 0.0
 
-            results[name] = {
-                "alerts": int(predicted.sum()),
+            metrics.update({
                 "precision": round(precision * 100, 1),
                 "recall": round(recall * 100, 1),
                 "f1": round(f1 * 100, 1),
@@ -184,13 +226,9 @@ def evaluate_data(data):
                 "fpr": round(fpr * 100, 1),
                 "false_positives": int(fp),
                 "missed": int(fn),
-            }
+            })
 
-    else:
-        for name, predicted in predictions.items():
-            results[name] = {
-                "alerts": int(predicted.sum()),
-            }
+        results[name] = metrics
 
     return data, results
 
@@ -223,8 +261,7 @@ def run_demo():
 
     data["actual_label"] = (risk_score >= 2).astype(int)
 
-    events, results = evaluate_data(data)
-    return events, results
+    return evaluate_data(data)
 
 
 # --------------------------------------------------
@@ -241,11 +278,8 @@ def register():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
-        if len(username) < 3 or len(username) > 80:
-            flash(
-                "Username must be between 3 and 80 characters.",
-                "error",
-            )
+        if not 3 <= len(username) <= 80:
+            flash("Username must be between 3 and 80 characters.", "error")
             return render_template("register.html")
 
         if not email or len(email) > 120 or "@" not in email:
@@ -253,10 +287,7 @@ def register():
             return render_template("register.html")
 
         if len(password) < 8:
-            flash(
-                "Password must be at least 8 characters.",
-                "error",
-            )
+            flash("Password must be at least 8 characters.", "error")
             return render_template("register.html")
 
         existing_user = db.session.execute(
@@ -269,10 +300,7 @@ def register():
         ).scalar_one_or_none()
 
         if existing_user:
-            flash(
-                "Username or email already exists.",
-                "error",
-            )
+            flash("Username or email already exists.", "error")
             return render_template("register.html")
 
         user = User(username=username, email=email)
@@ -281,10 +309,7 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        flash(
-            "Registration successful! Please log in.",
-            "success",
-        )
+        flash("Registration successful! Please log in.", "success")
         return redirect(url_for("login"))
 
     return render_template("register.html")
@@ -308,12 +333,8 @@ def login():
         ).scalar_one_or_none()
 
         if user is not None and user.check_password(password):
-            login_user(user)
-
-            # Explicitly mark the session as modified so Flask
-            # persists the authenticated session cookie.
-            from flask import session
-            session.modified = True
+            login_user(user, remember=False)
+            app.logger.info("Successful login for user_id=%s", user.id)
 
             flash("Login successful!", "success")
             return redirect(url_for("dashboard"))
@@ -327,12 +348,14 @@ def login():
 # LOGOUT
 # --------------------------------------------------
 
-@app.route("/logout")
+
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     logout_user()
     flash("You have been logged out successfully.", "success")
     return redirect(url_for("login"))
+
 
 
 # --------------------------------------------------
@@ -371,77 +394,24 @@ def dashboard():
                     )
 
                 missing = [
-                    col for col in FEATURES
-                    if col not in uploaded.columns
+                    column for column in FEATURES
+                    if column not in uploaded.columns
                 ]
 
                 if missing:
                     raise ValueError(
-                        "Missing required columns: "
-                        + ", ".join(missing)
+                        "Missing required columns: " + ", ".join(missing)
                     )
 
-                for col in FEATURES:
-                    uploaded[col] = pd.to_numeric(
-                        uploaded[col],
-                        errors="raise",
-                    )
-
-                if uploaded[FEATURES].isnull().any().any():
-                    raise ValueError(
-                        "Required feature columns contain missing values."
-                    )
-
-                if not np.isfinite(
-                    uploaded[FEATURES].to_numpy()
-                ).all():
-                    raise ValueError(
-                        "Feature columns contain infinite or invalid values."
-                    )
-
-                for col in ["unusual_hour", "new_device"]:
-                    if not uploaded[col].isin([0, 1]).all():
-                        raise ValueError(
-                            f"{col} must contain only 0 or 1."
-                        )
-
-                nonnegative_cols = [
-                    "failed_logins",
-                    "requests_per_minute",
-                    "bytes_sent_kb",
-                ]
-
-                if (
-                    uploaded[nonnegative_cols] < 0
-                ).any().any():
-                    raise ValueError(
-                        "Counts and bytes_sent_kb cannot be negative."
-                    )
-
+                # evaluate_data validates required feature values.
                 if "actual_label" in uploaded.columns:
-                    uploaded["actual_label"] = pd.to_numeric(
-                        uploaded["actual_label"],
-                        errors="raise",
-                    )
-
-                    if (
-                        uploaded["actual_label"].isnull().any()
-                        or not uploaded["actual_label"].isin([0, 1]).all()
-                    ):
-                        raise ValueError(
-                            "actual_label must contain only 0 and 1."
-                        )
-
                     upload_has_labels = True
 
                 upload_events, upload_results = evaluate_data(uploaded)
 
                 history_record = AnalysisHistory(
                     user_id=current_user.id,
-                    filename=(
-                        secure_filename(file.filename)
-                        or "uploaded.csv"
-                    ),
+                    filename=secure_filename(file.filename) or "uploaded.csv",
                     total_rows=len(uploaded),
                     rule_alerts=upload_results["Rule-Based"]["alerts"],
                     ml_alerts=upload_results["Isolation Forest"]["alerts"],
@@ -457,6 +427,7 @@ def dashboard():
 
             except (
                 ValueError,
+                KeyError,
                 pd.errors.ParserError,
                 UnicodeDecodeError,
             ) as exc:
@@ -474,20 +445,16 @@ def dashboard():
     chart_data = {
         "labels": list(demo_results.keys()),
         "precision": [
-            value.get("precision", 0)
-            for value in demo_results.values()
+            value.get("precision", 0) for value in demo_results.values()
         ],
         "recall": [
-            value.get("recall", 0)
-            for value in demo_results.values()
+            value.get("recall", 0) for value in demo_results.values()
         ],
         "f1": [
-            value.get("f1", 0)
-            for value in demo_results.values()
+            value.get("f1", 0) for value in demo_results.values()
         ],
         "fpr": [
-            value.get("fpr", 0)
-            for value in demo_results.values()
+            value.get("fpr", 0) for value in demo_results.values()
         ],
     }
 
@@ -523,10 +490,10 @@ def file_too_large(error):
 def download_report():
     file = request.files.get("csv_file")
 
-    if file is None:
+    if file is None or not file.filename:
         return "Please upload a CSV file.", 400
 
-    if not file.filename or not file.filename.lower().endswith(".csv"):
+    if not file.filename.lower().endswith(".csv"):
         return "Please upload a valid CSV file.", 400
 
     try:
@@ -535,15 +502,8 @@ def download_report():
         if data.empty:
             return "The uploaded CSV file is empty.", 400
 
-        missing = [
-            column for column in FEATURES
-            if column not in data.columns
-        ]
-
-        if missing:
-            return (
-                "Missing required columns: " + ", ".join(missing)
-            ), 400
+        if len(data) > 50000:
+            return "Please upload a CSV with no more than 50,000 rows.", 400
 
         analyzed_data, results = evaluate_data(data)
 
@@ -554,11 +514,8 @@ def download_report():
         writer.writerow([])
         writer.writerow(["MODEL METRICS"])
 
-        has_metrics = bool(results) and all(
-            all(
-                key in metrics
-                for key in ["precision", "recall", "f1"]
-            )
+        has_metrics = all(
+            all(key in metrics for key in ("precision", "recall", "f1"))
             for metrics in results.values()
         )
 
@@ -571,23 +528,19 @@ def download_report():
             for model_name, metrics in results.items():
                 writer.writerow([
                     model_name,
-                    metrics.get("alerts", 0),
-                    metrics.get("precision", 0),
-                    metrics.get("recall", 0),
-                    metrics.get("f1", 0),
-                    metrics.get("tn", 0),
-                    metrics.get("fp", 0),
-                    metrics.get("fn", 0),
-                    metrics.get("tp", 0),
+                    metrics["alerts"],
+                    metrics["precision"],
+                    metrics["recall"],
+                    metrics["f1"],
+                    metrics["tn"],
+                    metrics["fp"],
+                    metrics["fn"],
+                    metrics["tp"],
                 ])
         else:
             writer.writerow(["Model", "Alerts"])
-
             for model_name, metrics in results.items():
-                writer.writerow([
-                    model_name,
-                    metrics.get("alerts", 0),
-                ])
+                writer.writerow([model_name, metrics["alerts"]])
 
         writer.writerow([])
         writer.writerow(["EVENT ANALYSIS"])
@@ -601,15 +554,15 @@ def download_report():
         response.headers["Content-Disposition"] = (
             "attachment; filename=detectbench_analysis_report.csv"
         )
-
         return response
 
     except (
         ValueError,
         KeyError,
         pd.errors.ParserError,
-    ) as error:
-        return f"Could not analyze CSV: {error}", 400
+        UnicodeDecodeError,
+    ) as exc:
+        return f"Could not analyze CSV: {exc}", 400
 
 
 # --------------------------------------------------
