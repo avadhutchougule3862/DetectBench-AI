@@ -475,6 +475,11 @@ def dashboard():
 
                 upload_events, upload_results = evaluate_data(uploaded)
 
+                # Convert to dictionaries before database operations.
+                upload_events = upload_events.tail(20).to_dict(
+                    orient="records"
+                )
+
                 history_record = AnalysisHistory(
                     user_id=current_user.id,
                     filename=secure_filename(file.filename) or "uploaded.csv",
@@ -487,9 +492,7 @@ def dashboard():
                 db.session.add(history_record)
                 db.session.commit()
 
-                upload_events = upload_events.tail(20).to_dict(
-                    orient="records"
-                )
+        
 
             except (
                 ValueError,
