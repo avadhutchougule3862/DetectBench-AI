@@ -1,0 +1,13 @@
+Model,Actual,Predicted,Count
+MLP_ANN,Normal,Normal,27542
+MLP_ANN,Normal,Attack,9458
+MLP_ANN,Attack,Normal,1498
+MLP_ANN,Attack,Attack,43834
+RBM_Anomaly,Normal,Normal,35283
+RBM_Anomaly,Normal,Attack,1717
+RBM_Anomaly,Attack,Normal,42864
+RBM_Anomaly,Attack,Attack,2468
+RBM_ANN_Hybrid,Normal,Normal,30567
+RBM_ANN_Hybrid,Normal,Attack,6433
+RBM_ANN_Hybrid,Attack,Normal,15363
+RBM_ANN_Hybrid,Attack,Attack,29969

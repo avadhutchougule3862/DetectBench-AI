@@ -5,7 +5,7 @@ import uuid
 import pandas as pd
 import pytest
 
-from app import app, evaluate_data
+from app import app, evaluate_data, load_research_results
 app.config["WTF_CSRF_ENABLED"] = False
 from extensions import db
 from models import User, AnalysisHistory
@@ -269,3 +269,16 @@ def test_history_isolated_between_two_users():
     # User B must not see User A's history.
     assert b"user_b.csv" in response_b.data
     assert b"user_a.csv" not in response_b.data
+
+
+def test_offline_research_results_are_loaded_from_csv():
+    models, thresholds = load_research_results()
+
+    assert len(models) == 3
+    assert {row["model"] for row in models} == {
+        "MLP_ANN", "RBM_Anomaly", "RBM_Logistic_Hybrid"
+    }
+    assert len(thresholds) == 2
+    assert {row["threshold"] for row in thresholds} == {0.3, 0.4}
+    ann = next(row for row in models if row["model"] == "MLP_ANN")
+    assert ann["roc_auc"] == pytest.approx(97.5791, abs=0.01)

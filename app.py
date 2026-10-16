@@ -2,6 +2,7 @@
 import csv
 import io
 import os
+from pathlib import Path
 from flask_wtf.csrf import CSRFProtect
 import numpy as np
 import pandas as pd
@@ -265,6 +266,71 @@ def run_demo():
 
 
 # --------------------------------------------------
+# OFFLINE RESEARCH RESULTS (UNSW-NB15)
+# --------------------------------------------------
+
+RESEARCH_RESULTS_DIR = Path(__file__).resolve().parent / "research" / "results"
+
+
+def load_research_results():
+    """Load precomputed research summaries without retraining models."""
+    model_rows = []
+    threshold_rows = []
+
+    comparison_file = RESEARCH_RESULTS_DIR / "final_model_comparison.csv"
+    thresholds_file = RESEARCH_RESULTS_DIR / "final_ann_test_thresholds.csv"
+
+    try:
+        if comparison_file.is_file():
+            frame = pd.read_csv(comparison_file)
+            required = {
+                "Model", "Accuracy", "Precision", "Recall", "F1",
+                "ROC_AUC", "PR_AUC", "False_Positive_Rate",
+                "False_Positives", "Missed_Attacks",
+            }
+            if required.issubset(frame.columns):
+                for row in frame.to_dict(orient="records"):
+                    model_rows.append({
+                        "model": str(row["Model"]),
+                        "accuracy": float(row["Accuracy"]) * 100,
+                        "precision": float(row["Precision"]) * 100,
+                        "recall": float(row["Recall"]) * 100,
+                        "f1": float(row["F1"]) * 100,
+                        "roc_auc": float(row["ROC_AUC"]) * 100,
+                        "pr_auc": float(row["PR_AUC"]) * 100,
+                        "fpr": float(row["False_Positive_Rate"]) * 100,
+                        "false_positives": int(row["False_Positives"]),
+                        "missed_attacks": int(row["Missed_Attacks"]),
+                    })
+
+        if thresholds_file.is_file():
+            frame = pd.read_csv(thresholds_file)
+            required = {
+                "Model", "Threshold", "Accuracy", "Precision", "Recall",
+                "F1", "False_Positive_Rate", "False_Positives",
+                "Missed_Attacks",
+            }
+            if required.issubset(frame.columns):
+                for row in frame.to_dict(orient="records"):
+                    threshold_rows.append({
+                        "model": str(row["Model"]),
+                        "threshold": float(row["Threshold"]),
+                        "accuracy": float(row["Accuracy"]) * 100,
+                        "precision": float(row["Precision"]) * 100,
+                        "recall": float(row["Recall"]) * 100,
+                        "f1": float(row["F1"]) * 100,
+                        "fpr": float(row["False_Positive_Rate"]) * 100,
+                        "false_positives": int(row["False_Positives"]),
+                        "missed_attacks": int(row["Missed_Attacks"]),
+                    })
+    except (OSError, ValueError, KeyError, pd.errors.ParserError):
+        app.logger.exception("Could not load offline research result files")
+        return [], []
+
+    return model_rows, threshold_rows
+
+
+# --------------------------------------------------
 # REGISTER
 # --------------------------------------------------
 
@@ -458,9 +524,13 @@ def dashboard():
         ],
     }
 
+    research_models, research_thresholds = load_research_results()
+
     return render_template(
         "index.html",
         results=demo_results,
+        research_models=research_models,
+        research_thresholds=research_thresholds,
         total=len(demo_events),
         suspicious=int(demo_events["actual_label"].sum()),
         events=demo_events.tail(12).to_dict(orient="records"),

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -70,7 +70,6 @@
 
     <label for="csv_file">Select your CSV file</label>
 
-        <label for="csv_file">Select your CSV file</label>
 
         <input
             type="file"
@@ -123,20 +122,7 @@
     </button>
 </form>
 
-    <label for="report_csv">Select the analyzed CSV again to download its report:</label>
 
-    <input
-        type="file"
-        id="report_csv"
-        name="csv_file"
-        accept=".csv"
-        required
-    >
-
-    <button type="submit" class="download-report-btn">
-        Download Analysis Report
-    </button>
-</form>
 
         {% if upload_has_labels %}
             <p class="upload-help">
@@ -400,6 +386,110 @@
                 </table>
             </div>
         </section>
+
+
+        {% if research_models %}
+        <section class="section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">OFFLINE RESEARCH · UNSW-NB15</p>
+                    <h2>Research Model Comparison</h2>
+                </div>
+                <span class="section-note">Precomputed experiment results</span>
+            </div>
+
+            <p class="upload-help">
+                These metrics come from the separate UNSW-NB15 research experiment,
+                not from the synthetic dashboard demo or the CSV currently uploaded.
+                They are research results, not a production security guarantee.
+            </p>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Research Model</th>
+                            <th>Accuracy</th>
+                            <th>Precision</th>
+                            <th>Recall</th>
+                            <th>F1-score</th>
+                            <th>ROC-AUC</th>
+                            <th>PR-AUC</th>
+                            <th>FPR</th>
+                            <th>False Positives</th>
+                            <th>Missed Attacks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for model in research_models %}
+                        <tr>
+                            <td>{{ model.model }}</td>
+                            <td>{{ "%.2f"|format(model.accuracy) }}%</td>
+                            <td>{{ "%.2f"|format(model.precision) }}%</td>
+                            <td>{{ "%.2f"|format(model.recall) }}%</td>
+                            <td>{{ "%.2f"|format(model.f1) }}%</td>
+                            <td>{{ "%.2f"|format(model.roc_auc) }}%</td>
+                            <td>{{ "%.2f"|format(model.pr_auc) }}%</td>
+                            <td>{{ "%.2f"|format(model.fpr) }}%</td>
+                            <td>{{ model.false_positives }}</td>
+                            <td>{{ model.missed_attacks }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if research_thresholds %}
+        <section class="section">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">THRESHOLD ANALYSIS</p>
+                    <h2>ANN Test-Set Thresholds</h2>
+                </div>
+            </div>
+
+            <p class="upload-help">
+                The 0.3 threshold prioritizes recall; the 0.4 threshold produced
+                a higher F1-score in this reported test run and fewer false positives.
+                Threshold selection should be made using validation data.
+            </p>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Threshold</th>
+                            <th>Accuracy</th>
+                            <th>Precision</th>
+                            <th>Recall</th>
+                            <th>F1-score</th>
+                            <th>FPR</th>
+                            <th>False Positives</th>
+                            <th>Missed Attacks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in research_thresholds %}
+                        <tr>
+                            <td>{{ row.model }}</td>
+                            <td>{{ "%.1f"|format(row.threshold) }}</td>
+                            <td>{{ "%.2f"|format(row.accuracy) }}%</td>
+                            <td>{{ "%.2f"|format(row.precision) }}%</td>
+                            <td>{{ "%.2f"|format(row.recall) }}%</td>
+                            <td>{{ "%.2f"|format(row.f1) }}%</td>
+                            <td>{{ "%.2f"|format(row.fpr) }}%</td>
+                            <td>{{ row.false_positives }}</td>
+                            <td>{{ row.missed_attacks }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
 
         <section class="section">
             <div class="section-heading">
