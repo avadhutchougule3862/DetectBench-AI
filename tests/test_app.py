@@ -282,3 +282,119 @@ def test_offline_research_results_are_loaded_from_csv():
     assert {row["threshold"] for row in thresholds} == {0.3, 0.4}
     ann = next(row for row in models if row["model"] == "MLP_ANN")
     assert ann["roc_auc"] == pytest.approx(97.5791, abs=0.01)
+
+def test_register_creates_user_with_hashed_password():
+    client = app.test_client()
+
+    response = client.post(
+        "/register",
+        data={
+            "username": "new_test_user",
+            "email": "new_test_user@example.com",
+            "password": "securepass123",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers.get("Location") == "/login"
+
+    with app.app_context():
+        user = db.session.execute(
+            db.select(User).where(
+                User.email == "new_test_user@example.com"
+            )
+        ).scalar_one_or_none()
+
+        assert user is not None
+        assert user.password_hash != "securepass123"
+        assert user.check_password("securepass123")
+        assert not user.check_password("wrongpass123")
+
+
+def test_register_rejects_short_password():
+    client = app.test_client()
+
+    response = client.post(
+        "/register",
+        data={
+            "username": "short_pass_user",
+            "email": "short_pass@example.com",
+            "password": "123",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Password must be at least 8 characters." in response.data
+
+    with app.app_context():
+        user = db.session.execute(
+            db.select(User).where(
+                User.email == "short_pass@example.com"
+            )
+        ).scalar_one_or_none()
+
+        assert user is None
+
+
+def test_register_rejects_duplicate_email():
+    client = app.test_client()
+
+    first_response = client.post(
+        "/register",
+        data={
+            "username": "duplicate_user_one",
+            "email": "duplicate@example.com",
+            "password": "securepass123",
+        },
+    )
+    assert first_response.status_code == 302
+
+    second_response = client.post(
+        "/register",
+        data={
+            "username": "duplicate_user_two",
+            "email": "duplicate@example.com",
+            "password": "securepass123",
+        },
+        follow_redirects=True,
+    )
+
+    assert second_response.status_code == 200
+    assert b"Username or email already exists." in second_response.data
+
+
+def test_login_rejects_wrong_password():
+    user_id = create_test_user()
+    client = app.test_client()
+
+    response = login_user(
+        client,
+        get_user_email(user_id),
+        password="wrongpass123",
+    )
+
+    assert response.status_code == 200
+
+    with client.session_transaction() as session:
+        assert "_user_id" not in session
+
+
+def test_logout_requires_post_and_ends_session():
+    user_id = create_test_user()
+    client = app.test_client()
+
+    login_response = login_user(client, get_user_email(user_id))
+    assert login_response.status_code == 302
+
+    get_response = client.get("/logout")
+    assert get_response.status_code == 405
+
+    logout_response = client.post("/logout")
+    assert logout_response.status_code == 302
+    assert logout_response.headers.get("Location") == "/login"
+
+    protected_response = client.get("/history")
+    assert protected_response.status_code == 302
+    assert "/login" in protected_response.headers["Location"]
